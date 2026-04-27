@@ -37,13 +37,16 @@ def plot_simulation(logits, group, prs_col, sim_index, out_path):
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 
-def main(input_path, output_dir, n_simulations):
+
+def main(input_path, output_dir, n_simulations, param):
     """ Simulate dummy EWAS input files based on real data. To run it from the command line, use:
     python scripts/simulate_dummy_ewas_input.py data/prs.csv output/ewas_simulations 10
     Args:
         input_path (str): Path to the input data file (CSV).
         output_dir (str): Directory where the simulated files will be saved.
         n_simulations (int): Number of simulations to run.
+        param (float): Parameter to control the strength of association between PRS and group assignment.
+        1 means a moderate association, higher values increase the strength of association.
     Returns:
         None
     """
@@ -55,7 +58,7 @@ def main(input_path, output_dir, n_simulations):
     df = pd.read_csv(input_path)
     prs_col = "stdPRS_height"
     logits = df[prs_col]
-    probs = 1 / (1 + np.exp(-logits))
+    probs = 1 / (1 + np.exp(-param*logits))
     plot_prob_histogram(probs, os.path.join(run_dir, "prob_histogram.png"))
 
     print(f"Simulating {n_simulations} EWAS input files.")
@@ -76,6 +79,8 @@ if __name__ == "__main__":
     parser.add_argument("input_path", type=str, help="Path to the input data file.")
     parser.add_argument("output_dir", type=str, help="Path to the output directory.")
     parser.add_argument("n_simulations", type=int, help="Number of simulations to run.")
+    parser.add_argument("param", type=float, help="Parameter to control the strength of association "
+                                                  "between PRS and group assignment.")
     args = parser.parse_args()
 
-    main(args.input_path, args.output_dir, args.n_simulations)
+    main(args.input_path, args.output_dir, args.n_simulations, args.param)

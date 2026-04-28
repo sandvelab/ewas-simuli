@@ -44,7 +44,14 @@ def write_meta(out_path, **params):
             f.write(f"{key}: {value}\n")
 
 
-def main(input_path, output_dir, n_simulations, param, hard, seed):
+def to_quantiles(values):
+    """Rank-transform to uniform [0,1], then center to [-0.5, 0.5]."""
+    ranks = pd.Series(values).rank(method="average")
+    q = ranks / (len(ranks) + 1)
+    return q - 0.5   # center so intercept=0 gives ~50% prevalence
+
+
+def main(input_path, output_dir, n_simulations, param, hard, seed, quantile):
     """ Simulate dummy EWAS input files based on real data. To run it from the command line, use:
     python scripts/simulate_dummy_ewas_input.py data/prs.csv output/ewas_simulations 10
     Args:
@@ -55,6 +62,7 @@ def main(input_path, output_dir, n_simulations, param, hard, seed):
         1 means a moderate association, higher values increase the strength of association.
         hard (bool): If True, assign groups based on a hard threshold of 0.5 on the probabilities.
         seed (int): Random seed for reproducibility.
+        quantile (bool): If True, rank-transform PRS to uniform before applying sigmoid.
     Returns:
         None
     """
@@ -68,6 +76,10 @@ def main(input_path, output_dir, n_simulations, param, hard, seed):
     df = pd.read_csv(input_path)
     prs_col = "stdPRS_height"
     logits = df[prs_col]
+
+    if quantile:
+        logits = to_quantiles(logits)
+
     probs = 1 / (1 + np.exp(-param*logits))
     plot_prob_histogram(probs, os.path.join(run_dir, "prob_histogram.png"))
 
@@ -79,7 +91,8 @@ def main(input_path, output_dir, n_simulations, param, hard, seed):
         n_samples=len(df),
         sigmoid_param=param,
         hard_thresholding=hard,
-        random_seed=seed
+        random_seed=seed,
+        quantile_transform=quantile
     )
     if hard:
         print("Using hard thresholding for group assignment (threshold = 0.5).")
@@ -87,13 +100,13 @@ def main(input_path, output_dir, n_simulations, param, hard, seed):
 
         out = df[["MID", "CID"]].copy()
         out["group"] = np.where(group == 1, "val", "ctrl")
-        out.to_csv(os.path.join(run_dir, "hard_ewas_input.csv"), index=False)
+        out.to_csv(os.path.join(run_dir, "0_ewas_input.csv"), index=False)
 
         plot_simulation(logits, group, prs_col, "hard",
-                        os.path.join(run_dir, "hard_ewas_input.png"))
+                        os.path.join(run_dir, "0_ewas_input.png"))
     else:
         for i in range(n_simulations):
-            print(f"Simulating {n_simulations} EWAS input files.")
+            print(f"Simulating {i} EWAS input file.")
             # Simulate group labels based on PRS values using a logistic function
             group = np.random.binomial(1, probs)
             # Create output DataFrame with IID and group labels
@@ -112,9 +125,11 @@ if __name__ == "__main__":
     parser.add_argument("n_simulations", type=int, help="Number of simulations to run.")
     parser.add_argument("param", type=float, help="Parameter to control the strength of association "
                                                   "between PRS and group assignment.")
-    parser.add_argument("hard", type=bool, help="If True, assign groups based on a hard threshold of 0.5 "
-                                                "on the probabilities.")
+    parser.add_argument("--hard", action="store_true", help="If True, assign groups based on a hard "
+                                                            "threshold of 0.5 on the probabilities.")
     parser.add_argument("seed", type=int, help="Random seed for reproducibility.")
+    parser.add_argument("--quantile", action="store_true",
+                        help="If set, rank-transform PRS to uniform before applying sigmoid.")
     args = parser.parse_args()
 
-    main(args.input_path, args.output_dir, args.n_simulations, args.param, args.hard, args.seed)
+    main(args.input_path, args.output_dir, args.n_simulations, args.param, args.hard, args.seed, args.quantile)

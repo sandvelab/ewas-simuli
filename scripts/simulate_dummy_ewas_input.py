@@ -38,7 +38,13 @@ def plot_simulation(logits, group, prs_col, sim_index, out_path):
     plt.close(fig)
 
 
-def main(input_path, output_dir, n_simulations, param):
+def write_meta(out_path, **params):
+    with open(out_path, "w") as f:
+        for key, value in params.items():
+            f.write(f"{key}: {value}\n")
+
+
+def main(input_path, output_dir, n_simulations, param, hard, seed):
     """ Simulate dummy EWAS input files based on real data. To run it from the command line, use:
     python scripts/simulate_dummy_ewas_input.py data/prs.csv output/ewas_simulations 10
     Args:
@@ -47,6 +53,8 @@ def main(input_path, output_dir, n_simulations, param):
         n_simulations (int): Number of simulations to run.
         param (float): Parameter to control the strength of association between PRS and group assignment.
         1 means a moderate association, higher values increase the strength of association.
+        hard (bool): If True, assign groups based on a hard threshold of 0.5 on the probabilities.
+        seed (int): Random seed for reproducibility.
     Returns:
         None
     """
@@ -54,6 +62,8 @@ def main(input_path, output_dir, n_simulations, param):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join(output_dir, timestamp)
     os.makedirs(run_dir, exist_ok=True)
+    if seed is not None:
+        np.random.seed(seed)
 
     df = pd.read_csv(input_path)
     prs_col = "stdPRS_height"
@@ -61,16 +71,37 @@ def main(input_path, output_dir, n_simulations, param):
     probs = 1 / (1 + np.exp(-param*logits))
     plot_prob_histogram(probs, os.path.join(run_dir, "prob_histogram.png"))
 
-    print(f"Simulating {n_simulations} EWAS input files.")
-    for i in range(n_simulations):
-        # Simulate group labels based on PRS values using a logistic function
-        group = np.random.binomial(1, probs)
-        # Create output DataFrame with IID and group labels
+    write_meta(
+        os.path.join(run_dir, "meta.txt"),
+        timestamp=timestamp,
+        input_path=input_path,
+        n_simulations=n_simulations,
+        n_samples=len(df),
+        sigmoid_param=param,
+        hard_thresholding=hard,
+        random_seed=seed
+    )
+    if hard:
+        print("Using hard thresholding for group assignment (threshold = 0.5).")
+        group = (probs >= 0.5).astype(int)
+
         out = df[["MID", "CID"]].copy()
         out["group"] = np.where(group == 1, "val", "ctrl")
-        out_path = os.path.join(run_dir, f"{i}_ewas_input.csv")
-        out.to_csv(out_path, index=False)
-        plot_simulation(logits, group, prs_col, i, os.path.join(run_dir, f"{i}_ewas_input.png"))
+        out.to_csv(os.path.join(run_dir, "hard_ewas_input.csv"), index=False)
+
+        plot_simulation(logits, group, prs_col, "hard",
+                        os.path.join(run_dir, "hard_ewas_input.png"))
+    else:
+        for i in range(n_simulations):
+            print(f"Simulating {n_simulations} EWAS input files.")
+            # Simulate group labels based on PRS values using a logistic function
+            group = np.random.binomial(1, probs)
+            # Create output DataFrame with IID and group labels
+            out = df[["MID", "CID"]].copy()
+            out["group"] = np.where(group == 1, "val", "ctrl")
+            out_path = os.path.join(run_dir, f"{i}_ewas_input.csv")
+            out.to_csv(out_path, index=False)
+            plot_simulation(logits, group, prs_col, i, os.path.join(run_dir, f"{i}_ewas_input.png"))
     print(f"Output will be saved to: {run_dir}")
 
 
@@ -81,6 +112,9 @@ if __name__ == "__main__":
     parser.add_argument("n_simulations", type=int, help="Number of simulations to run.")
     parser.add_argument("param", type=float, help="Parameter to control the strength of association "
                                                   "between PRS and group assignment.")
+    parser.add_argument("hard", type=bool, help="If True, assign groups based on a hard threshold of 0.5 "
+                                                "on the probabilities.")
+    parser.add_argument("seed", type=int, help="Random seed for reproducibility.")
     args = parser.parse_args()
 
-    main(args.input_path, args.output_dir, args.n_simulations, args.param)
+    main(args.input_path, args.output_dir, args.n_simulations, args.param, args.hard, args.seed)
